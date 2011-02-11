@@ -2,11 +2,11 @@
 
 local _0 = string.sub(debug.getinfo(1,'S').source, 2)
 
-local lapp    = require 'pl.lapp'
 local dump    = require 'pl.pretty'.write
 local zip     = require 'zip'
 local lom     = require 'lxp.lom'
 
+-- Return a string representing the usage statement.
 function usage(msg)
     if ( msg ) then
         msg = msg .. "\n\n"
@@ -16,12 +16,15 @@ function usage(msg)
     return msg .. _0 ..
         [[: Create a new slide deck from a *.thmx file and plain text.
 
- -o,--output(file)          Location of *.pptx file to generate.
- -t,--theme (file)          Location of *.thmx theme file to use.
- -i,--input (default stdin) Location of input plain text.
+ -o,--output(file)           Location of *.pptx file to generate.
+ -t,--theme (file)           Location of *.thmx theme file to use.
+ -l,--layout (name or index) Select the layout from the theme.
+ -i,--input (default stdin)  Location of input plain text.
 ]]
 end
 
+-- Parse the CLI options.  I tried usin lapp, but it just isn't
+-- generic enough.
 function parse_args(args)
     local function parse(i, args, result, key, match)
         if ( not match ) then
@@ -77,10 +80,15 @@ function parse_args(args)
     return result
 end
 
+-- Copy over relevant ports of theme file.
 function copy_theme(theme, output, output_content_types)
     local content_type = get_content_types(theme)
     for i=1,#theme do
         local fname = theme:get_name(i)
+        -- TODO: I should really be copying these based on content
+        -- type, not based on path, I should also be "fixing up" any
+        -- non-relative references.
+
         local match = fname:match("^theme/(slideLayouts/.*)") or
             fname:match("^theme/(slideMasters/.*)") or
             fname:match("^theme/(media/.*)") or
@@ -93,25 +101,7 @@ function copy_theme(theme, output, output_content_types)
     end
 end
 
--- TODO:
---  cp -r template:theme/slideLayouts/
---        output:ppt/slideLayouts/
---  cp -r template:theme/slideMasters/
---        output:ppt/slideMasters/
---  cp -r template:theme/media/
---        output:ppt/media/
---  cp template:theme/presentation.xml
---        output:ppt/presentation.xml + 
---        <p:sldIdLst>
---          <p:sldId id="257" r:id="rId2"/>
---          ...
---        </p:sldIdLst>
---  cp template:theme/_rels/presentation.xml.rels
---        output:ppt/_rels/presentation.xml.rels +
---        <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/> 
--- cp template:theme/theme/theme1.xml
---        output:ppt/theme/theme1.xml
-
+-- Generate a string representing the [Content_Type].xml file.
 function make_content_types(ctypes)
     local result = {
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
@@ -123,10 +113,10 @@ function make_content_types(ctypes)
     }
     for k,v in pairs(ctypes) do
         k = k:gsub("^/*", "/")
-        if ( not ( k:match("xml$") and v == "application/xml" ) and
-             not k:match("jpeg$") and
-             not k:match("rels$") and
-             not k:match("jpg$") )
+        if ( not ( k:match("xml$")  and v == "application/xml" ) and
+             not ( k:match("jpeg$") and v == "image/jpeg" ) and
+             not ( k:match("rels$") and v == "application/vnd.openxmlformats-package.relationships+xml" ) and
+             not ( k:match("jpg$")  and v == "image/jpeg" ) )
         then
             result[#result+1] = '<Override PartName="' .. k .. '" ContentType="' .. v .. '"/>'
         end
@@ -135,43 +125,39 @@ function make_content_types(ctypes)
     return table.concat(result, "\n")
 end
 
-function main(args)
-    local output = assert(zip.open(args.output, zip.OR(zip.EXCL, zip.CREATE)))
-    local theme  = assert(zip.open(args.theme,  zip.CHECKCONS))
-    local input  = io.stdin
-    local output_content_types = {}
-
-    if args.input then
-        input = io.open(args.input, "r")
-    end
-
-    copy_theme(theme, output, output_content_types)
-
-    output:add("_rels/.rels", "string", [[
-<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
-</Relationships>
-               ]])
-
+function add_presentation(output, output_content_types, slide_count)
+    -- TODO: Copy presentation.xml from the theme and simply add to
+    -- the <p:sldIdLst>.
     output_content_types["ppt/presentation.xml"] = "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"
-    output:add("ppt/_rels/presentation.xml.rels", "string", [[
-<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
-  <Relationship Id="rId6" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>
-</Relationships>
-               ]])
-    output:add("ppt/presentation.xml", "string", [[
-<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    local xml = {
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/>',
+        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>',
+    }
+    for i=1,slide_count do
+        xml[#xml+1] = '<Relationship Id="rId' .. (i+2) ..
+            '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide' ..
+            i .. '.xml"/>'
+    end
+    xml[#xml+1] = '</Relationships>'
+
+    output:add("ppt/_rels/presentation.xml.rels", "string", table.concat(xml, "\n"))
+
+    xml = {
+[[<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" saveSubsetFonts="1" autoCompressPictures="0">
   <p:sldMasterIdLst>
     <p:sldMasterId id="2147483648" r:id="rId1"/>
   </p:sldMasterIdLst>
-  <p:sldIdLst>
-    <p:sldId id="257" r:id="rId2"/>
-  </p:sldIdLst>
+  <p:sldIdLst>]],
+    }
+
+    for i=1,slide_count do
+        xml[#xml+1] = '    <p:sldId id="' .. (i+220) .. '" r:id="rId' .. (i+2) .. '"/>'
+    end
+    xml[#xml+1] =
+[[  </p:sldIdLst>
   <p:sldSz cx="9144000" cy="6858000" type="screen4x3"/>
   <p:notesSz cx="6858000" cy="9144000"/>
   <p:defaultTextStyle>
@@ -269,21 +255,29 @@ function main(args)
       </a:defRPr>
     </a:lvl9pPr>
   </p:defaultTextStyle>
-</p:presentation>
-               ]])
+</p:presentation>]]
 
+    output:add("ppt/presentation.xml", "string", table.concat(xml, "\n"))    
+end
+
+function add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics)
+    if not current_song_title then
+        current_song_title=''
+    end
+
+    slide_count = slide_count + 1
 
     -- TODO: Iterate over each layout and select the:
     --  <p:cSld name="2_Custom Layout">
     --  this is so we can give people the option to choose which layout to use.
-    output_content_types["ppt/slides/slide1.xml"] = "application/vnd.openxmlformats-officedocument.presentationml.slide+xml"
-    output:add("ppt/slides/_rels/slide1.xml.rels", "string", [[
+    output_content_types["ppt/slides/slide" .. tostring(slide_count) .. ".xml"] = "application/vnd.openxmlformats-officedocument.presentationml.slide+xml"
+    output:add("ppt/slides/_rels/slide" .. tostring(slide_count) .. ".xml.rels", "string", [[
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout3.xml"/>
 </Relationships>
                ]])
-    output:add("ppt/slides/slide1.xml", "string", [[
+    output:add("ppt/slides/slide" .. tostring(slide_count) .. ".xml", "string", [[
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
   <p:cSld>
@@ -318,8 +312,7 @@ function main(args)
           <a:p>
             <a:r>
               <a:rPr lang="en-US" dirty="0" smtClean="0"/>
-              <a:t>Lyrics in the Song
-Next Line of Lyrics</a:t>
+              <a:t>]] .. table.concat(current_song_lyrics, "\n") .. [[</a:t>
             </a:r>
             <a:endParaRPr lang="en-US" dirty="0"/>
           </a:p>
@@ -342,39 +335,81 @@ Next Line of Lyrics</a:t>
           <a:p>
             <a:r>
               <a:rPr lang="en-US" dirty="0" smtClean="0"/>
-              <a:t>Song Title</a:t>
+              <a:t>]] .. current_song_title .. [[</a:t>
             </a:r>
             <a:endParaRPr lang="en-US" dirty="0"/>
           </a:p>
         </p:txBody>
       </p:sp>
     </p:spTree>
-    <p:extLst>
-      <p:ext uri="{BB962C8B-B14F-4D97-AF65-F5344CB8AC3E}">
-        <p14:creationId xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" val="3656003290"/>
-      </p:ext>
-    </p:extLst>
   </p:cSld>
-  <p:clrMapOvr>
-    <a:masterClrMapping/>
-  </p:clrMapOvr>
 </p:sld>
                ]])
+
+    return slide_count
+end
+
+function main(args)
+    local theme  = assert(zip.open(args.theme,  zip.CHECKCONS))
+    local output = assert(zip.open(args.output, zip.OR(zip.EXCL, zip.CREATE)))
+    local input  = io.stdin
+    local output_content_types = {}
+
+    if args.input then
+        input = io.open(args.input, "r")
+    end
+
+    copy_theme(theme, output, output_content_types)
+
+    output:add("_rels/.rels", "string", [[
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+</Relationships>
+               ]])
+
+
+    local slide_count = 0
+    local current_song_title  = nil
+    local current_song_lyrics = {}
+    local dash_dash = 0
+    while true do
+        local line = input:read()
+        if ( nil == line ) then
+            break
+        elseif ( line:match("^%-%-") ) then
+            dash_dash = 1
+        elseif ( dash_dash == 1 and line:match("%w+") ) then
+            dash_dash = 0
+            if ( #current_song_lyrics > 0 ) then
+                slide_count = add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics)
+                current_song_lyrics = {}
+            end
+            current_song_title  = line
+        elseif ( dash_dash > 1 and line:match("%w+") ) then
+            dash_dash = 0
+            if ( #current_song_lyrics > 0 ) then
+                slide_count = add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics)
+                current_song_title  = nil
+            end
+            current_song_lyrics = {line}
+        elseif ( dash_dash > 0 ) then
+            dash_dash = dash_dash + 1
+        else
+            current_song_lyrics[#current_song_lyrics+1] = line
+        end
+    end
+    
+    if ( #current_song_lyrics > 0 ) then
+        slide_count = add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics)
+    end
+
+    add_presentation(output, output_content_types, slide_count)
 
     output:add("[Content_Types].xml", "string", make_content_types(output_content_types))
 
     output:close()
-
---[[
-    local content_type = get_content_types(template)
-
-    for i=1, #template do
-        local name = template:get_name(i)
-        print(name .. ": " .. tostring(content_type(name)))
---        output.add(template:get_name(i), slurp(template, i))
-    end
-]]--
-
+    theme:close()
 
     return 0
 end
