@@ -154,7 +154,7 @@ function add_presentation(output, output_content_types, slide_count)
     }
 
     for i=1,slide_count do
-        xml[#xml+1] = '    <p:sldId id="' .. (i+220) .. '" r:id="rId' .. (i+2) .. '"/>'
+        xml[#xml+1] = '    <p:sldId id="' .. (i+257) .. '" r:id="rId' .. (i+2) .. '"/>'
     end
     xml[#xml+1] =
 [[  </p:sldIdLst>
