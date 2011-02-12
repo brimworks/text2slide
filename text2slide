@@ -257,12 +257,17 @@ function add_presentation(output, output_content_types, slide_count)
   </p:defaultTextStyle>
 </p:presentation>]]
 
-    output:add("ppt/presentation.xml", "string", table.concat(xml, "\n"))    
+    output:add("ppt/presentation.xml", "string", table.concat(xml, "\n"))
 end
 
 function add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics)
     if not current_song_title then
         current_song_title=''
+    end
+
+    -- trim extra spaces.
+    while ( #current_song_lyrics and '' == current_song_lyrics[#current_song_lyrics] ) do
+        current_song_lyrics[#current_song_lyrics] = nil
     end
 
     slide_count = slide_count + 1
@@ -274,10 +279,10 @@ function add_slide(output, output_content_types, slide_count, current_song_title
     output:add("ppt/slides/_rels/slide" .. tostring(slide_count) .. ".xml.rels", "string", [[
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout3.xml"/>
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout4.xml"/>
 </Relationships>
                ]])
-    output:add("ppt/slides/slide" .. tostring(slide_count) .. ".xml", "string", [[
+    local slide_body = [[
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
   <p:cSld>
@@ -312,7 +317,7 @@ function add_slide(output, output_content_types, slide_count, current_song_title
           <a:p>
             <a:r>
               <a:rPr lang="en-US" dirty="0" smtClean="0"/>
-              <a:t>]] .. table.concat(current_song_lyrics, "\n") .. [[</a:t>
+              <a:t>]] .. table.concat(current_song_lyrics, "\r\n") .. [[</a:t>
             </a:r>
             <a:endParaRPr lang="en-US" dirty="0"/>
           </a:p>
@@ -344,9 +349,18 @@ function add_slide(output, output_content_types, slide_count, current_song_title
     </p:spTree>
   </p:cSld>
 </p:sld>
-               ]])
+      ]]
+
+    output:add("ppt/slides/slide" .. tostring(slide_count) .. ".xml", "string", slide_body)
 
     return slide_count
+end
+
+function trim(str)
+    if ( nil == str ) then
+        return nil
+    end
+    return str:gsub("^%s*(.-)%s*$", "%1")
 end
 
 function main(args)
@@ -364,7 +378,7 @@ function main(args)
     output:add("_rels/.rels", "string", [[
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="/ppt/presentation.xml"/>
 </Relationships>
                ]])
 
@@ -374,7 +388,7 @@ function main(args)
     local current_song_lyrics = {}
     local dash_dash = 0
     while true do
-        local line = input:read()
+        local line = trim(input:read())
         if ( nil == line ) then
             break
         elseif ( line:match("^%-%-") ) then
