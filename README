@@ -1,2 +1,34 @@
-Simply command line application that takes plain text and converts
-them to *.pptx files.
+== Purpose ==
+
+This command line tool takes as input:
+
+ [1] A "Theme" (*.thmx) file.
+
+ [2] The name of a "Layout" within the theme.
+
+ [3] A plain text file formatted as described below.
+
+It then generates a *.pptx that has been tested to work with
+PowerPoint 2010 (may also work with other power point programs, but
+YMMV).
+
+== Format Of Plain Text ==
+
+The plain text format is simple.  Perhaps in the future we can have
+more advanced formatting, but the point is to make the plain text easy
+to visualize on a slide.
+
+--
+Title goes between two "--" characters (newlines are not permitted).
+--
+
+Content of each slide continues until a "--" is found with a blank
+line before and a blank line after it.
+
+Empty lines are permitted and are preserved, however all other space
+is trimmed.
+
+--
+
+Next slide content is here.  Even though there is no "--" after this
+content, this is still placed on a separate slide.

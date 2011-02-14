@@ -3,7 +3,7 @@
 local _0 = string.sub(debug.getinfo(1,'S').source, 2)
 
 local dump    = require 'pl.pretty'.write
-local zip     = require 'zip'
+local zip     = require 'brimworks.zip'
 local lom     = require 'lxp.lom'
 
 -- Return a string representing the usage statement.
@@ -16,10 +16,10 @@ function usage(msg)
     return msg .. _0 ..
         [[: Create a new slide deck from a *.thmx file and plain text.
 
- -o,--output(file)           Location of *.pptx file to generate.
- -t,--theme (file)           Location of *.thmx theme file to use.
- -l,--layout (name or index) Select the layout from the theme.
- -i,--input (default stdin)  Location of input plain text.
+ -o,--output (file)          Location of *.pptx file to generate.
+ -t,--theme  (file)          Location of *.thmx theme file to use.
+ -l,--layout (name)          Select the layout from the theme.
+ -i,--input  (default stdin) Location of input plain text.
 ]]
 end
 
@@ -66,7 +66,12 @@ function parse_args(args)
             parse(i, args, result,
                   "theme",
                   match(args[i], "-t", "-t(=.*)",
-                        "--theme", "--theme(=.*)"))
+                        "--theme", "--theme(=.*)")) or
+            parse(i, args, result,
+                  "layout",
+                  match(args[i], "-l", "-l(=.*)",
+                        "--layout", "--layout(=.*)")) or
+            nil
 
         if ( not idx ) then
             print(usage("Invalid argument: " .. args[i]))
@@ -74,8 +79,8 @@ function parse_args(args)
         end
         i = i + idx
     end
-    if ( not result.output or not result.theme ) then
-        print(usage("Missing required parameter --output or --theme"))
+    if ( not result.output or not result.theme or not result.layout ) then
+        print(usage("Missing required parameter --output and/or --theme and/or --layout"))
     end
     return result
 end
@@ -260,7 +265,7 @@ function add_presentation(output, output_content_types, slide_count)
     output:add("ppt/presentation.xml", "string", table.concat(xml, "\n"))
 end
 
-function add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics)
+function add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics, layout)
     if not current_song_title then
         current_song_title=''
     end
@@ -279,9 +284,8 @@ function add_slide(output, output_content_types, slide_count, current_song_title
     output:add("ppt/slides/_rels/slide" .. tostring(slide_count) .. ".xml.rels", "string", [[
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout4.xml"/>
-</Relationships>
-               ]])
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="]] ..
+               layout .. [["/></Relationships>]])
     local slide_body = [[
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
@@ -363,6 +367,31 @@ function trim(str)
     return str:gsub("^%s*(.-)%s*$", "%1")
 end
 
+function locate_layout(theme, layout_name)
+    local ctype = get_content_types(theme)
+    local layout_names = {}
+
+    layout_name = layout_name:lower()
+
+    for i=1,#theme do
+        if ( ctype(theme:get_name(i)) ==
+             "application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml" )
+        then
+            local xml = slurp(theme, i)
+            local doc = lom.parse(xml)
+            if ( doc[1].tag == "p:cSld" and
+                 doc[1].attr.name )
+            then
+                if ( doc[1].attr.name:lower() == layout_name ) then
+                    return "/" .. theme:get_name(i)
+                end
+                layout_names[#layout_names+1] = doc[1].attr.name
+            end
+        end
+    end
+    error("Unknown layout name '" .. layout_name .. "', but found '" .. table.concat(layout_names, "' '") .. "'")
+end
+
 function main(args)
     local theme  = assert(zip.open(args.theme,  zip.CHECKCONS))
     local output = assert(zip.open(args.output, zip.OR(zip.EXCL, zip.CREATE)))
@@ -372,6 +401,8 @@ function main(args)
     if args.input then
         input = io.open(args.input, "r")
     end
+
+    local layout = locate_layout(theme, args.layout)
 
     copy_theme(theme, output, output_content_types)
 
@@ -396,14 +427,14 @@ function main(args)
         elseif ( dash_dash == 1 and line:match("%w+") ) then
             dash_dash = 0
             if ( #current_song_lyrics > 0 ) then
-                slide_count = add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics)
+                slide_count = add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics, layout)
                 current_song_lyrics = {}
             end
             current_song_title  = line
         elseif ( dash_dash > 1 and line:match("%w+") ) then
             dash_dash = 0
             if ( #current_song_lyrics > 0 ) then
-                slide_count = add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics)
+                slide_count = add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics, layout)
                 current_song_title  = nil
             end
             current_song_lyrics = {line}
@@ -415,7 +446,7 @@ function main(args)
     end
     
     if ( #current_song_lyrics > 0 ) then
-        slide_count = add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics)
+        slide_count = add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics, layout)
     end
 
     add_presentation(output, output_content_types, slide_count)
