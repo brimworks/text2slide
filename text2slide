@@ -383,7 +383,9 @@ function locate_layout(theme, layout_name)
                  doc[1].attr.name )
             then
                 if ( doc[1].attr.name:lower() == layout_name ) then
-                    return "/" .. theme:get_name(i)
+                    local name = theme:get_name(i)
+                    name = name:gsub("^/*theme/", "/ppt/")
+                    return name
                 end
                 layout_names[#layout_names+1] = doc[1].attr.name
             end
