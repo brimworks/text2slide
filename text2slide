@@ -266,7 +266,9 @@ function add_presentation(output, output_content_types, slide_count)
 end
 
 function add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics, layout)
+    local transition = true
     if not current_song_title then
+        transition = false
         current_song_title=''
     end
 
@@ -352,8 +354,23 @@ function add_slide(output, output_content_types, slide_count, current_song_title
       </p:sp>
     </p:spTree>
   </p:cSld>
-</p:sld>
       ]]
+
+
+    if ( transition ) then
+        slide_body = slide_body ..
+            '<p:transition xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" spd="slow">' ..
+            '<p:fade thruBlk="1"/>' ..
+            '</p:transition>' ..
+            '<p:timing>' ..
+            '<p:tnLst>' ..
+            '<p:par>' ..
+            '<p:cTn xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" id="1" dur="indefinite" restart="never" nodeType="tmRoot"/>' ..
+            '</p:par>' ..
+            '</p:tnLst>' ..
+            '</p:timing>'
+    end
+    slide_body = slide_body .. '</p:sld>'
 
     output:add("ppt/slides/slide" .. tostring(slide_count) .. ".xml", "string", slide_body)
 
