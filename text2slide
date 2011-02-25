@@ -130,7 +130,7 @@ function make_content_types(ctypes)
     return table.concat(result, "\n")
 end
 
-function add_presentation(output, output_content_types, slide_count)
+function add_presentation(output, output_content_types, slide_count, section_idxs)
     -- TODO: Copy presentation.xml from the theme and simply add to
     -- the <p:sldIdLst>.
     output_content_types["ppt/presentation.xml"] = "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"
@@ -260,16 +260,51 @@ function add_presentation(output, output_content_types, slide_count)
       </a:defRPr>
     </a:lvl9pPr>
   </p:defaultTextStyle>
+  <p:extLst>
+    <p:ext uri="{521415D9-36F7-43E2-AB2F-B90AF26B5E84}">
+      <p14:sectionLst xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main">]]
+
+    for _,section in pairs(section_idxs) do
+        uid = gen_guid()
+        xml[#xml+1] =
+            '<p14:section name="' .. section.name .. '" id="{' .. uid .. '}">' ..
+            '<p14:sldIdLst>'
+        for i=1,#section do
+            xml[#xml+1] = '<p14:sldId id="' .. (257+section[i]) .. '"/>'
+        end
+        xml[#xml+1] =
+            '</p14:sldIdLst>' ..
+            '</p14:section>'
+    end
+    xml[#xml+1] = [[
+      </p14:sectionLst>
+    </p:ext>
+  </p:extLst>
 </p:presentation>]]
 
     output:add("ppt/presentation.xml", "string", table.concat(xml, "\n"))
 end
 
-function add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics, layout)
-    local transition = true
+function gen_guid()
+    local fh = io.popen("uuidgen", "r")
+    local guid = fh:read("*l")
+    fh:close()
+    return guid
+end
+
+function add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics, layout, section_idxs)
+    slide_count = slide_count + 1
+
+    local transition
+
     if not current_song_title then
+        local section = section_idxs[#section_idxs]
+        section[#section+1] = slide_count
         transition = false
         current_song_title=''
+    else
+        section_idxs[#section_idxs+1] = {name=current_song_title, slide_count}
+        transition = true
     end
 
     -- trim extra spaces.
@@ -277,7 +312,6 @@ function add_slide(output, output_content_types, slide_count, current_song_title
         current_song_lyrics[#current_song_lyrics] = nil
     end
 
-    slide_count = slide_count + 1
 
     -- TODO: Iterate over each layout and select the:
     --  <p:cSld name="2_Custom Layout">
@@ -437,6 +471,7 @@ function main(args)
     local current_song_title  = nil
     local current_song_lyrics = {}
     local dash_dash = 0
+    local section_idxs = {}
     while true do
         local line = trim(input:read())
         if ( nil == line ) then
@@ -446,14 +481,14 @@ function main(args)
         elseif ( dash_dash == 1 and line:match("%w+") ) then
             dash_dash = 0
             if ( #current_song_lyrics > 0 ) then
-                slide_count = add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics, layout)
+                slide_count = add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics, layout, section_idxs)
                 current_song_lyrics = {}
             end
             current_song_title  = line
         elseif ( dash_dash > 1 and line:match("%w+") ) then
             dash_dash = 0
             if ( #current_song_lyrics > 0 ) then
-                slide_count = add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics, layout)
+                slide_count = add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics, layout, section_idxs)
                 current_song_title  = nil
             end
             current_song_lyrics = {line}
@@ -465,10 +500,10 @@ function main(args)
     end
     
     if ( #current_song_lyrics > 0 ) then
-        slide_count = add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics, layout)
+        slide_count = add_slide(output, output_content_types, slide_count, current_song_title, current_song_lyrics, layout, section_idxs)
     end
 
-    add_presentation(output, output_content_types, slide_count)
+    add_presentation(output, output_content_types, slide_count, section_idxs)
 
     output:add("[Content_Types].xml", "string", make_content_types(output_content_types))
 
