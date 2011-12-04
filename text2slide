@@ -97,7 +97,7 @@ function copy_theme(theme, output, output_content_types)
         local match = fname:match("^theme/(slideLayouts/.*)") or
             fname:match("^theme/(slideMasters/.*)") or
             fname:match("^theme/(media/.*)") or
-            fname:match("^theme/(theme/theme1\.xml)$")
+            fname:match("^theme/(theme/theme1%.xml)$")
         if ( match ) then
             local new_fname = "ppt/" .. match
             output:add(new_fname, "zip", theme, i)
@@ -472,11 +472,13 @@ function main(args)
     local current_song_lyrics = {}
     local dash_dash = 0
     local section_idxs = {}
+    local ignore = true
     while true do
         local line = trim(input:read())
         if ( nil == line ) then
             break
         elseif ( line:match("^%-%-") ) then
+            ignore = false
             dash_dash = 1
         elseif ( dash_dash == 1 and line:match("%w+") ) then
             dash_dash = 0
@@ -494,7 +496,7 @@ function main(args)
             current_song_lyrics = {line}
         elseif ( dash_dash > 0 ) then
             dash_dash = dash_dash + 1
-        else
+        elseif ( not ignore ) then
             current_song_lyrics[#current_song_lyrics+1] = line
         end
     end
